@@ -1,0 +1,219 @@
+-- main.lua - First Task: Get the boat feel right
+
+function love.load()
+    -- Boat object with physics properties
+    boat = {
+        x = love.graphics.getWidth() / 2,
+        y = love.graphics.getHeight() / 2,
+        angle = 0,           -- Current facing direction
+        targetAngle = 0,     -- Where we want to face
+        speed = 0,           -- Current forward speed
+        maxSpeed = 200,      -- Maximum forward speed
+        acceleration = 50,   -- How fast we speed up
+        deceleration = 30,   -- How fast we slow down
+        turnSpeed = 2,       -- How fast we can turn
+        width = 40,
+        height = 20,
+        
+        -- Velocity components
+        vx = 0,
+        vy = 0,
+        
+        -- Wake trail points for visual feedback
+        wakePoints = {},
+        wakeTimer = 0,
+    }
+    
+    -- Camera (smooth following)
+    camera = {
+        x = boat.x,
+        y = boat.y,
+        smoothing = 0.05,  -- Lower = smoother/slower following
+    }
+    
+    -- Simple wave effect for water
+    waveTime = 0
+end
+
+function love.update(dt)
+    waveTime = waveTime + dt
+    
+    -- Handle input
+    local turnInput = 0
+    if love.keyboard.isDown("left") or love.keyboard.isDown("a") then
+        turnInput = -1
+    elseif love.keyboard.isDown("right") or love.keyboard.isDown("d") then
+        turnInput = 1
+    end
+    
+    local thrustInput = 0
+    if love.keyboard.isDown("up") or love.keyboard.isDown("w") then
+        thrustInput = 1
+    elseif love.keyboard.isDown("down") or love.keyboard.isDown("s") then
+        thrustInput = -0.5  -- Reverse is slower
+    end
+    
+    -- Update boat physics
+    updateBoat(boat, turnInput, thrustInput, dt)
+    
+    -- Update camera (smooth follow)
+    camera.x = camera.x + (boat.x - camera.x) * camera.smoothing
+    camera.y = camera.y + (boat.y - camera.y) * camera.smoothing
+    
+    -- Update wake trail
+    updateWake(boat, dt)
+end
+
+function updateBoat(boat, turnInput, thrustInput, dt)
+    -- Turning (only when moving)
+    if math.abs(boat.speed) > 10 then
+        boat.targetAngle = boat.angle + turnInput * boat.turnSpeed * dt * (boat.speed / boat.maxSpeed)
+    end
+    
+    -- Smooth angle interpolation
+    local angleDiff = boat.targetAngle - boat.angle
+    boat.angle = boat.angle + angleDiff * 0.1
+    
+    -- Speed control
+    if thrustInput > 0 then
+        boat.speed = math.min(boat.speed + boat.acceleration * dt, boat.maxSpeed)
+    elseif thrustInput < 0 then
+        boat.speed = math.max(boat.speed - boat.acceleration * dt, -boat.maxSpeed * 0.3)
+    else
+        -- Natural deceleration
+        if boat.speed > 0 then
+            boat.speed = math.max(boat.speed - boat.deceleration * dt, 0)
+        else
+            boat.speed = math.min(boat.speed + boat.deceleration * dt, 0)
+        end
+    end
+    
+    -- Convert speed and angle to velocity
+    boat.vx = math.cos(boat.angle) * boat.speed
+    boat.vy = math.sin(boat.angle) * boat.speed
+    
+    -- Update position
+    boat.x = boat.x + boat.vx * dt
+    boat.y = boat.y + boat.vy * dt
+    
+    -- Add subtle wave motion
+    local waveOffset = math.sin(waveTime * 2 + boat.x * 0.01) * 2
+    boat.y = boat.y + waveOffset * dt
+end
+
+function updateWake(boat, dt)
+    boat.wakeTimer = boat.wakeTimer + dt
+    
+    -- Add new wake point every 0.05 seconds when moving
+    if boat.wakeTimer > 0.05 and math.abs(boat.speed) > 20 then
+        boat.wakeTimer = 0
+        
+        -- Add wake points behind the boat
+        local wakeAngle = boat.angle + math.pi  -- Opposite direction
+        local wakeDistance = 25
+        
+        table.insert(boat.wakePoints, {
+            x = boat.x + math.cos(wakeAngle) * wakeDistance,
+            y = boat.y + math.sin(wakeAngle) * wakeDistance,
+            life = 1.0,  -- Fade out over time
+            size = math.abs(boat.speed) / boat.maxSpeed * 10 + 5
+        })
+    end
+    
+    -- Update and remove old wake points
+    for i = #boat.wakePoints, 1, -1 do
+        local point = boat.wakePoints[i]
+        point.life = point.life - dt * 0.5
+        point.size = point.size + dt * 20  -- Expand over time
+        
+        if point.life <= 0 then
+            table.remove(boat.wakePoints, i)
+        end
+    end
+end
+
+function love.draw()
+    -- Clear with ocean color
+    love.graphics.clear(0.1, 0.2, 0.3)
+    
+    -- Camera transform
+    love.graphics.push()
+    love.graphics.translate(
+        love.graphics.getWidth() / 2 - camera.x,
+        love.graphics.getHeight() / 2 - camera.y
+    )
+    
+    -- Draw simple water effect
+    drawWater()
+    
+    -- Draw wake trail
+    drawWake(boat)
+    
+    -- Draw boat
+    drawBoat(boat)
+    
+    love.graphics.pop()
+    
+    -- Draw UI (speed indicator)
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.print("Speed: " .. math.floor(boat.speed), 10, 10)
+    love.graphics.print("Controls: WASD or Arrow Keys", 10, 30)
+end
+
+function drawWater()
+    love.graphics.setColor(0.15, 0.25, 0.35, 0.3)
+    
+    -- Simple wave pattern
+    for x = camera.x - 400, camera.x + 400, 50 do
+        for y = camera.y - 300, camera.y + 300, 50 do
+            local waveHeight = math.sin(waveTime + x * 0.01) * math.cos(waveTime * 0.7 + y * 0.01) * 5
+            love.graphics.circle("line", x, y + waveHeight, 20 + waveHeight)
+        end
+    end
+end
+
+function drawWake(boat)
+    for _, point in ipairs(boat.wakePoints) do
+        love.graphics.setColor(0.8, 0.9, 1, point.life * 0.3)
+        love.graphics.circle("line", point.x, point.y, point.size)
+        love.graphics.setColor(0.6, 0.7, 0.8, point.life * 0.2)
+        love.graphics.circle("fill", point.x, point.y, point.size * 0.5)
+    end
+end
+
+function drawBoat(boat)
+    love.graphics.push()
+    love.graphics.translate(boat.x, boat.y)
+    love.graphics.rotate(boat.angle)
+    
+    -- Hull
+    love.graphics.setColor(0.6, 0.4, 0.2)
+    love.graphics.polygon("fill",
+        -boat.width/2, -boat.height/2,
+        boat.width/2, -boat.height/3,
+        boat.width/2, boat.height/3,
+        -boat.width/2, boat.height/2
+    )
+    
+    -- Outline
+    love.graphics.setColor(0.4, 0.2, 0.1)
+    love.graphics.setLineWidth(2)
+    love.graphics.polygon("line",
+        -boat.width/2, -boat.height/2,
+        boat.width/2, -boat.height/3,
+        boat.width/2, boat.height/3,
+        -boat.width/2, boat.height/2
+    )
+    
+    -- Simple sail (if moving forward)
+    if boat.speed > 20 then
+        love.graphics.setColor(0.9, 0.9, 0.8)
+        love.graphics.polygon("fill",
+            0, 0,
+            -15, -25,
+            5, -30
+        )
+    end
+    
+    love.graphics.pop()
+end
